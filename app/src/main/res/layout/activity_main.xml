@@ -26,7 +26,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="40dp"
-        android:text="Free &amp; unlimited voice-to-text"
+        android:text="Voz a texto gratis"
         android:textColor="#99FFFFFF"
         android:textSize="14sp" />
 
@@ -34,37 +34,9 @@
         android:id="@+id/status_text"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:text="Checking..."
-        android:textColor="#CCFFFFFF"
-        android:textSize="16sp" />
-
-    <ProgressBar
-        android:id="@+id/progress_bar"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:max="100"
-        android:progressTint="#FF6C63FF"
-        android:visibility="gone" />
-
-    <TextView
-        android:id="@+id/progress_text"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
         android:layout_marginBottom="24dp"
+        android:text="Listo"
         android:textColor="#CCFFFFFF"
-        android:visibility="gone" />
-
-    <Button
-        android:id="@+id/download_button"
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:layout_marginBottom="12dp"
-        android:backgroundTint="#FF6C63FF"
-        android:text="Download Model (~75 MB)"
-        android:textColor="#FFFFFF"
         android:textSize="16sp" />
 
     <Button
@@ -72,8 +44,7 @@
         android:layout_width="match_parent"
         android:layout_height="56dp"
         android:backgroundTint="#FF00C853"
-        android:enabled="false"
-        android:text="Start Voice Input"
+        android:text="Activar voz"
         android:textColor="#FFFFFF"
         android:textSize="16sp" />
 

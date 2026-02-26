@@ -11,11 +11,14 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
-import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -23,24 +26,15 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.Toast
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 class OverlayService : Service() {
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
-    private var whisperEngine: WhisperEngine? = null
-    private var audioRecorder: AudioRecorder? = null
-    private var isRecording = false
-    private var isTranscribing = false
-    private var wakeLock: PowerManager.WakeLock? = null
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var isListening = false
+    private var micButton: ImageView? = null
 
     companion object {
         const val CHANNEL_ID = "whisper_overlay"
@@ -52,14 +46,7 @@ class OverlayService : Service() {
         try {
             createNotificationChannel()
             startForeground(NOTIFICATION_ID, createNotification())
-
-            whisperEngine = (application as App).whisperEngine
-            audioRecorder = AudioRecorder(this)
-
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WhisperVoice::Overlay")
-            wakeLock?.acquire(60 * 60 * 1000L)
-
+            initSpeechRecognizer()
             setupOverlay()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -91,7 +78,7 @@ class OverlayService : Service() {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Whisper Voice activo")
-                .setContentText("Mantén la burbuja para hablar")
+                .setContentText("Toca la burbuja para hablar")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentIntent(pi)
                 .setOngoing(true)
@@ -100,12 +87,131 @@ class OverlayService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("Whisper Voice activo")
-                .setContentText("Mantén la burbuja para hablar")
+                .setContentText("Toca la burbuja para hablar")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .build()
         }
+    }
+
+    private fun initSpeechRecognizer() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "Reconocimiento de voz no disponible", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                micButton?.setColorFilter(0xFFFF0000.toInt())
+            }
+
+            override fun onBeginningOfSpeech() {}
+
+            override fun onRmsChanged(rmsdB: Float) {}
+
+            override fun onBufferReceived(buffer: ByteArray?) {}
+
+            override fun onEndOfSpeech() {
+                micButton?.setColorFilter(0xFFFFAA00.toInt())
+            }
+
+            override fun onError(error: Int) {
+                isListening = false
+                micButton?.colorFilter = null
+                micButton?.animate()?.scaleX(1.0f)?.scaleY(1.0f)?.setDuration(150)?.start()
+
+                if (error == SpeechRecognizer.ERROR_NO_MATCH ||
+                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                ) {
+                    Toast.makeText(this@OverlayService, "No se detectó voz", Toast.LENGTH_SHORT)
+                        .show()
+                } else if (error == SpeechRecognizer.ERROR_NETWORK ||
+                    error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
+                ) {
+                    Toast.makeText(this@OverlayService, "Error de red", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onResults(results: Bundle?) {
+                isListening = false
+                micButton?.colorFilter = null
+                micButton?.animate()?.scaleX(1.0f)?.scaleY(1.0f)?.setDuration(150)?.start()
+
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val text = matches?.firstOrNull()?.trim()
+
+                if (!text.isNullOrBlank()) {
+                    vibrate(20)
+                    val acc = InputAccessibilityService.instance
+                    if (acc != null) {
+                        acc.insertText(text)
+                    } else {
+                        val cb = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                        cb.setPrimaryClip(ClipData.newPlainText("voice", text))
+                        Toast.makeText(
+                            this@OverlayService,
+                            "Copiado: $text",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } else {
+                    Toast.makeText(
+                        this@OverlayService,
+                        "No se pudo transcribir",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {}
+
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+    }
+
+    private fun startListening() {
+        if (isListening) return
+
+        if (speechRecognizer == null) {
+            initSpeechRecognizer()
+            if (speechRecognizer == null) {
+                Toast.makeText(this, "No se puede iniciar el reconocimiento", Toast.LENGTH_SHORT)
+                    .show()
+                return
+            }
+        }
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        }
+
+        isListening = true
+        vibrate(50)
+        micButton?.setColorFilter(0xFF2196F3.toInt())
+        micButton?.animate()?.scaleX(1.3f)?.scaleY(1.3f)?.setDuration(150)?.start()
+
+        try {
+            speechRecognizer?.startListening(intent)
+        } catch (e: Exception) {
+            isListening = false
+            micButton?.colorFilter = null
+            micButton?.animate()?.scaleX(1.0f)?.scaleY(1.0f)?.setDuration(150)?.start()
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopListening() {
+        if (!isListening) return
+        try {
+            speechRecognizer?.stopListening()
+        } catch (_: Exception) {}
     }
 
     private fun vibrate(ms: Long) {
@@ -152,30 +258,30 @@ class OverlayService : Service() {
             y = 0
         }
 
-        val micButton = overlayView?.findViewById<ImageView>(R.id.mic_button) ?: return
+        micButton = overlayView?.findViewById(R.id.mic_button) ?: return
 
         var initialX = 0
         var initialY = 0
         var initialTouchX = 0f
         var initialTouchY = 0f
+        var isDragging = false
 
-        micButton.setOnTouchListener { _, event ->
+        micButton?.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
                     initialY = params.y
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
-                    if (!isTranscribing) {
-                        startVoiceRecording(micButton)
-                    }
+                    isDragging = false
                     true
                 }
 
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - initialTouchX).toInt()
                     val dy = (event.rawY - initialTouchY).toInt()
-                    if (abs(dx) > 60 || abs(dy) > 60) {
+                    if (abs(dx) > 30 || abs(dy) > 30) {
+                        isDragging = true
                         params.x = initialX - dx
                         params.y = initialY + dy
                         try {
@@ -186,8 +292,12 @@ class OverlayService : Service() {
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (isRecording) {
-                        stopVoiceRecording(micButton)
+                    if (!isDragging) {
+                        if (isListening) {
+                            stopListening()
+                        } else {
+                            startListening()
+                        }
                     }
                     true
                 }
@@ -204,85 +314,9 @@ class OverlayService : Service() {
         }
     }
 
-    private fun startVoiceRecording(micButton: ImageView) {
-        if (isRecording || isTranscribing) return
-
-        if (whisperEngine == null || !whisperEngine!!.isLoaded) {
-            Toast.makeText(this, "Abre la app primero para cargar el modelo", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        try {
-            val started = audioRecorder?.startRecording() ?: false
-            if (!started) {
-                Toast.makeText(this, "No se puede acceder al micrófono", Toast.LENGTH_SHORT).show()
-                return
-            }
-            isRecording = true
-            vibrate(50)
-            micButton.setColorFilter(0xFFFF0000.toInt())
-            micButton.animate().scaleX(1.3f).scaleY(1.3f).setDuration(150).start()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun stopVoiceRecording(micButton: ImageView) {
-        if (!isRecording) return
-        isRecording = false
-        vibrate(30)
-        micButton.animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).start()
-
-        val audioData: FloatArray
-        try {
-            audioData = audioRecorder?.stopRecording() ?: return
-        } catch (e: Exception) {
-            micButton.colorFilter = null
-            return
-        }
-
-        if (audioData.size < AudioRecorder.SAMPLE_RATE / 2) {
-            micButton.colorFilter = null
-            return
-        }
-
-        isTranscribing = true
-        micButton.setColorFilter(0xFFFFAA00.toInt())
-
-        scope.launch {
-            try {
-                val text = withContext(Dispatchers.IO) {
-                    whisperEngine?.transcribe(audioData) ?: ""
-                }
-
-                micButton.colorFilter = null
-                isTranscribing = false
-
-                if (text.isNotBlank()) {
-                    val trimmed = text.trim()
-                    val acc = InputAccessibilityService.instance
-                    if (acc != null) {
-                        acc.insertText(trimmed)
-                        vibrate(20)
-                    } else {
-                        val cb = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                        cb.setPrimaryClip(ClipData.newPlainText("voice", trimmed))
-                        Toast.makeText(this@OverlayService, "Copiado: $trimmed", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    Toast.makeText(this@OverlayService, "No se pudo transcribir", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                micButton.colorFilter = null
-                isTranscribing = false
-            }
-        }
-    }
-
     override fun onDestroy() {
-        scope.cancel()
+        try { speechRecognizer?.destroy() } catch (_: Exception) {}
         try { overlayView?.let { windowManager?.removeView(it) } } catch (_: Exception) {}
-        try { wakeLock?.release() } catch (_: Exception) {}
         super.onDestroy()
     }
 

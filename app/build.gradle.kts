@@ -11,12 +11,8 @@ android {
         applicationId = "com.pauvepe.whispervoice"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
-
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
+        versionCode = 3
+        versionName = "2.0"
     }
 
     buildTypes {
@@ -28,15 +24,6 @@ android {
             )
         }
     }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
-
-    ndkVersion = "26.1.10909125"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
