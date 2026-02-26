@@ -55,6 +55,13 @@ class MainActivity : AppCompatActivity() {
 
         requestMicPermission()
         updateUI()
+
+        // Check for updates silently
+        scope.launch {
+            try {
+                UpdateManager(this@MainActivity).checkAndUpdate()
+            } catch (_: Exception) {}
+        }
     }
 
     private fun requestMicPermission() {
@@ -62,33 +69,42 @@ class MainActivity : AppCompatActivity() {
             != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.RECORD_AUDIO),
-                REQUEST_MIC
+                this, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC
             )
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_MIC && grantResults.isNotEmpty()
+            && grantResults[0] == PackageManager.PERMISSION_GRANTED
+        ) {
+            updateUI()
         }
     }
 
     private fun updateUI() {
         when {
             !whisperEngine.isModelDownloaded() -> {
-                statusText.text = "Model not downloaded"
+                statusText.text = "Modelo no descargado"
                 downloadButton.isEnabled = true
                 downloadButton.visibility = View.VISIBLE
                 startButton.isEnabled = false
             }
 
             !whisperEngine.isLoaded -> {
-                statusText.text = "Loading model..."
+                statusText.text = "Cargando modelo..."
                 downloadButton.visibility = View.GONE
                 startButton.isEnabled = false
                 scope.launch {
                     val ok = withContext(Dispatchers.IO) { whisperEngine.loadModel() }
                     if (ok) {
-                        statusText.text = "Ready"
+                        statusText.text = "Listo"
                         startButton.isEnabled = true
                     } else {
-                        statusText.text = "Failed to load model"
+                        statusText.text = "Error al cargar modelo"
                         downloadButton.visibility = View.VISIBLE
                         downloadButton.isEnabled = true
                     }
@@ -96,7 +112,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             else -> {
-                statusText.text = "Ready"
+                statusText.text = "Listo"
                 downloadButton.visibility = View.GONE
                 startButton.isEnabled = true
             }
@@ -107,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         downloadButton.isEnabled = false
         progressBar.visibility = View.VISIBLE
         progressText.visibility = View.VISIBLE
+        statusText.text = "Descargando modelo..."
 
         scope.launch {
             val ok = whisperEngine.downloadModel { progress ->
@@ -120,18 +137,20 @@ class MainActivity : AppCompatActivity() {
             progressText.visibility = View.GONE
 
             if (ok) {
-                Toast.makeText(this@MainActivity, "Model downloaded!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Modelo descargado!", Toast.LENGTH_SHORT).show()
                 updateUI()
             } else {
-                Toast.makeText(this@MainActivity, "Download failed. Check internet.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Error. Verifica tu internet.", Toast.LENGTH_LONG).show()
                 downloadButton.isEnabled = true
+                statusText.text = "Error de descarga"
             }
         }
     }
 
     private fun startOverlay() {
-        // Check overlay permission
+        // Overlay permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Activa el permiso de superposición", Toast.LENGTH_LONG).show()
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
@@ -141,17 +160,17 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Suggest enabling accessibility service
+        // Accessibility (optional but recommended)
         if (InputAccessibilityService.instance == null) {
             Toast.makeText(
                 this,
-                "Enable accessibility service for auto-paste (optional)",
+                "Activa el servicio de accesibilidad para auto-pegar (opcional)",
                 Toast.LENGTH_LONG
             ).show()
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
-        // Start overlay
+        // Start service
         val intent = Intent(this, OverlayService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -165,10 +184,10 @@ class MainActivity : AppCompatActivity() {
     @Deprecated("Use ActivityResult API")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_OVERLAY) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
-                startOverlay()
-            }
+        if (requestCode == REQUEST_OVERLAY && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+            && Settings.canDrawOverlays(this)
+        ) {
+            startOverlay()
         }
     }
 

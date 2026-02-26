@@ -35,14 +35,43 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build Debug APK
+      - name: Generate signing keystore
+        run: |
+          keytool -genkey -v \
+            -keystore ${{ github.workspace }}/release.jks \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias whisper \
+            -storepass whisper2026 \
+            -keypass whisper2026 \
+            -dname "CN=Pau,O=Pauvepe,L=ES,C=ES"
+
+      - name: Build and sign APK
+        run: |
+          gradle assembleRelease \
+            -Pandroid.injected.signing.store.file=${{ github.workspace }}/release.jks \
+            -Pandroid.injected.signing.store.password=whisper2026 \
+            -Pandroid.injected.signing.key.alias=whisper \
+            -Pandroid.injected.signing.key.password=whisper2026
+
+      - name: Also build debug APK
         run: gradle assembleDebug
+
+      - name: Find APKs
+        id: apk
+        run: |
+          RELEASE=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          DEBUG=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "release=$RELEASE" >> $GITHUB_OUTPUT
+          echo "debug=$DEBUG" >> $GITHUB_OUTPUT
+          ls -lh $RELEASE $DEBUG
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: whisper-voice-input
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            ${{ steps.apk.outputs.release }}
+            ${{ steps.apk.outputs.debug }}
 
       - name: Create Release
         if: github.ref == 'refs/heads/main'
@@ -50,6 +79,6 @@ jobs:
         with:
           tag_name: v${{ github.run_number }}
           name: Build ${{ github.run_number }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: ${{ steps.apk.outputs.debug }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
