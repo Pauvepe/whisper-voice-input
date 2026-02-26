@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -27,15 +27,13 @@ jobs:
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager "ndk;26.1.10909125" "cmake;3.22.1"
 
-      - name: Generate Gradle Wrapper
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-          unzip -q gradle-8.5-bin.zip
-          ./gradle-8.5/bin/gradle wrapper --gradle-version 8.5
-          rm -rf gradle-8.5 gradle-8.5-bin.zip
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.5'
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -43,7 +41,7 @@ jobs:
           name: whisper-voice-input
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Create Release (on main push)
+      - name: Create Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v1
         with:
